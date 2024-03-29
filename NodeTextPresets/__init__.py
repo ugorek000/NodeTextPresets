@@ -108,22 +108,6 @@ def GetTextPresetFromTree(tree):
     return txt_result+"]}"
 
 def AddPresetToTree(tree, dict_preset):
-    def SetNodeFromDbItem(nd, dbItem):
-        for dk, dv in dbItem[1].items():
-            match dk:
-                case "props":
-                    for dk, dv in dv.items():
-                        if dk=='node_tree':
-                            dv = bpy.data.node_groups.get(dv)
-                        setattr(nd, dk, dv)
-                case "sockets":
-                    tgl = dbItem[0]=='NodeReroute'
-                    for dk, dv in dv.items():
-                        sk = (nd.inputs if dk<0 else nd.outputs)[abs(dk)-1]
-                        for dk, dv in dv.items():
-                            if (tgl)and(dk=='default_value'):
-                                continue
-                            setattr(sk, dk, dv)
     #Что-то кривит `context.space_data.cursor_location_from_region(event.mouse_x, event.mouse_y)` для чтения из context.space_data.cursor_location, поэтому через костыль:
     bpy.ops.node.add_node('INVOKE_DEFAULT', type='NodeReroute')
     center = tree.nodes.active.location[:]
@@ -132,7 +116,23 @@ def AddPresetToTree(tree, dict_preset):
     list_nodes = []
     for li in dict_preset['nodes']:
         nd = tree.nodes.new(li[0])
-        SetNodeFromDbItem(nd, li)
+        ##
+        for dk, dv in li[1].items():
+            match dk:
+                case "props":
+                    for dk, dv in dv.items():
+                        if dk=='node_tree':
+                            dv = bpy.data.node_groups.get(dv)
+                        setattr(nd, dk, dv)
+                case "sockets":
+                    tgl = li[0]=='NodeReroute'
+                    for dk, dv in dv.items():
+                        sk = (nd.inputs if dk<0 else nd.outputs)[abs(dk)-1]
+                        for dk, dv in dv.items():
+                            if (tgl)and(dk=='default_value'):
+                                continue
+                            setattr(sk, dk, dv)
+        ##
         bNd = opa.BNode(nd)
         bNd.locx += center[0]
         bNd.locy += center[1]
@@ -238,6 +238,8 @@ class OpNodeTextPresets(bpy.types.Operator):
                 dict_preset = NtpData.dict_presets[self.name]['eval']
                 bpy.ops.node.select_all(action='DESELECT')
                 list_nodes = AddPresetToTree(tree, dict_preset)
+                assert list_nodes
+                tree.nodes.active = list_nodes[-1]
                 bpy.ops.node.translate_attach('INVOKE_DEFAULT')
                 NtpData.dict_whereOpened[NtpData.GetKeyForDictWo(context)] = False
         return {'FINISHED'}
@@ -283,6 +285,7 @@ class PanelNodeTextPresets(bpy.types.Panel):
                     secs = 10-(time.perf_counter()-UserAlertDel.time)
                     if secs<0:
                         UserAlertDel.sure = False
+                #todo кажется ещё нужен поисковой фильтр.
                 for dk, dv in NtpData.dict_presets.items():
                     if dv['eval']['tree']==context.space_data.tree_type:
                         rowItem = colList.row(align=True)
