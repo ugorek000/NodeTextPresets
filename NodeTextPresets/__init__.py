@@ -1,7 +1,8 @@
 bl_info = {'name':"NodeTextPresets", 'author':"ugorek",
            'version':(2,0,0), 'blender':(4,1,0), 'created':"2024.03.29",
            'description':"", 'location':"",
-           'warning':"", 'category':"Node"}
+           'warning':"", 'category':"Node",
+           'tracker_url':"https://github.com/ugorek000/NodeTextPresets/issues", 'wiki_url':""}
 #№№ as package
 
 from builtins import len as length
