@@ -1,5 +1,5 @@
 bl_info = {'name':"NodeTextPresets", 'author':"ugorek",
-           'version':(2,0,0), 'blender':(4,1,0), 'created':"2024.03.29",
+           'version':(2,0,2), 'blender':(4,1,1), 'created':"2024.06.15",
            'description':"", 'location':"",
            'warning':"", 'category':"Node",
            'tracker_url':"https://github.com/ugorek000/NodeTextPresets/issues", 'wiki_url':""}
@@ -15,8 +15,15 @@ if __name__!="__main__":
 
 import opa
 import uu_ly
-import uu_regutils
-rud = uu_regutils.ModuleData()
+
+class OpSimpleExec(bpy.types.Operator):
+    bl_idname = 'ntp.simple_exec'
+    bl_label = "OpSimpleExec"
+    bl_options = {'UNDO'}
+    exc: bpy.props.StringProperty(name="Exec", default="")
+    def invoke(self, context, event):
+        exec(self.exc)
+        return {'FINISHED'}
 
 class NtpData:
     dict_whereOpened = {}
@@ -64,7 +71,7 @@ def GetTextPresetFromTree(tree):
         dict_result = {}
         ##
         ndRef = ndTar.id_data.nodes.new(ndTar.bl_idname)
-        dict_result["props"] = GetNdDifferenceAsText(ndTar, ndRef, "'{dk}':{val}", set_ignoredProps={'name', 'select', 'show_texture', 'is_active_output'})
+        dict_result["props"] = GetNdDifferenceAsText(ndTar, ndRef, "'{dk}':{val}", set_ignoredProps={'name', 'select', 'show_texture', 'is_active_output', 'active_item'})
         dict_sockets = dict_result.setdefault("sockets", {})
         for cyc0, puts in enumerate(('inputs','outputs')):
             dir = cyc0*2-1
@@ -146,8 +153,7 @@ def ProcPresetFile(prefs, action, *, name="", data=""):
     txtFile = prefs.pathToPresetFile
     assert (action=="Load")or(not NtpData.txtErrorInLoad)
     match action:
-        case "Load":
-            #Заметка: в остальных действиях нет try, потому что они вызывают "Load".
+        case "Load": #Заметка: в остальных действиях нет try, потому что они вызывают "Load".
             try: #(os.path.isfile(txtFile))and(os.path.exists(txtFile))
                 with open(txtFile, "r") as file:
                     NtpData.dict_presets = eval("{"+",".join(file.read().splitlines())+"}")
@@ -171,90 +177,77 @@ def ProcPresetFile(prefs, action, *, name="", data=""):
                 del NtpData.dict_presets[name]
                 ProcPresetFile(prefs, "Save")
 
-isUpdatingPathToPresetFile = False
 def UpdatePathToPresetFile(self, context):
-    global isUpdatingPathToPresetFile
-    if isUpdatingPathToPresetFile:
+    if UpdatePathToPresetFile.__dict__.setdefault("tgl", False):
         return
-    isUpdatingPathToPresetFile = True
+    UpdatePathToPresetFile.tgl = True
     self.pathToPresetFile = self.pathToPresetFile.strip("\"")
     ProcPresetFile(self, "Load")
-    isUpdatingPathToPresetFile = False
+    UpdatePathToPresetFile.tgl = False
 
-fitOptionItems = ( ('NONE',       "None",              "None"),
-                   ('TOGGLE',     "Toggle Visibility", "Toggle visibility of Panel"),
-                   ('COPYDIFF',   "Copy Difference",   "Copy selected nodes as raw preset"),
-                   ('EXPORT',     "Export",            "Export with overwriting"),
-                   ('ADD',        "Add",               "Add"),
-                   ('DEL',        "Del",               "Delete"),
-                   ('RELOAD',     "Reload",            "Reload from file"),
-                   ('OPENFOLDER', "Open Folder",       "Open folder of presets file") )
-class OpNodeTextPresets(bpy.types.Operator):
-    bl_idname = 'node.text_presets'
-    bl_label = "Node Presets"
-    bl_options = {'UNDO'}
-    option: bpy.props.EnumProperty(name="Option", default='NONE', items=fitOptionItems)
-    name: bpy.props.StringProperty(name="Name")
-    def invoke(self, context, event):
+class NtpOp:
+    def TogglePanelOp(context):
+        """Toggle visibility of Panel"""
+        key = NtpData.GetKeyForDictWo(context)
+        if NtpData.dict_whereOpened.setdefault(key, 0)<2:
+            NtpData.dict_whereOpened[key] = 1-NtpData.dict_whereOpened[key]
+        if NtpData.dict_whereOpened[key]:
+            ProcPresetFile(Prefs(), "Load")
+    def TogglePinOp(context):
+        """Toggle pinned of Panel"""
+        key = NtpData.GetKeyForDictWo(context)
+        if NtpData.dict_whereOpened.setdefault(key, 0):
+            NtpData.dict_whereOpened[key] = 3-NtpData.dict_whereOpened[key]
+    def CopyDiffOp(context, event):
+        """Copy selected nodes as raw preset"""
         tree = context.space_data.edit_tree
+        if (aNd:=tree.nodes.active)and(aNd.select):
+            text = GetTextPresetFromTree(tree)
+            if event.shift:
+                text =  f"\"{Prefs().nameOfPresetToExport}\":\""+txt.replace("\"","\\\"")+"]}\","
+            context.window_manager.clipboard = text
+    def OpenFolderOp():
+        """Open folder of presets file"""
+        #subprocess.Popen(f"explorer /select,\"{Prefs().pathToPresetFile}\"")
+        os.startfile(os.path.dirname(Prefs().pathToPresetFile))
+    def ReloadOp():
+        """Reload all from file"""
+        ProcPresetFile(Prefs(), "Load")
+    def ExportOp(context):
+        """Export with overwriting"""
         prefs = Prefs()
-        match self.option:
-            case 'TOGGLE':
-                key = NtpData.GetKeyForDictWo(context)
-                NtpData.dict_whereOpened.setdefault(key, False)
-                NtpData.dict_whereOpened[key] = not NtpData.dict_whereOpened[key]
-                if NtpData.dict_whereOpened[key]:
-                    ProcPresetFile(prefs, "Load")
-            case 'COPYDIFF':
-                aNd = tree.nodes.active
-                if (aNd)and(aNd.select):
-                    text = GetTextPresetFromTree(tree)
-                    if event.shift:
-                        text =  f"\"{prefs.nameOfPresetToExport}\":\""+txt.replace("\"","\\\"")+"]}\","
-                    context.window_manager.clipboard = text
-            case 'OPENFOLDER':
-                #subprocess.Popen(f"explorer /select,\"{prefs.pathToPresetFile}\"")
-                os.startfile(os.path.dirname(prefs.pathToPresetFile))
-            case 'RELOAD':
-                ProcPresetFile(prefs, "Load")
-            case 'EXPORT':
-                aNd = tree.nodes.active
-                if (aNd)and(aNd.select)and(name:=prefs.nameOfPresetToExport):
-                    ProcPresetFile(prefs, "Append", name=name, data=GetTextPresetFromTree(tree))
-                    prefs.nameOfPresetToExport = ""
-                    ProcPresetFile(prefs, "Load")
-            case 'DEL':
-                if (UserAlertDel.sure)and(UserAlertDel.name==self.name):
-                    ProcPresetFile(prefs, "Remove", name=self.name)
-                    ProcPresetFile(prefs, "Load")
-                    UserAlertDel.sure = False
-                else:
-                    UserAlertDel.sure = True
-                    UserAlertDel.name = self.name
-                    UserAlertDel.time = int(time.perf_counter())
-            case 'ADD':
-                if event.shift:
-                    prefs.nameOfPresetToExport = self.name
-                    return {'CANCELLED'}
-                dict_preset = NtpData.dict_presets[self.name]['eval']
-                bpy.ops.node.select_all(action='DESELECT')
-                list_nodes = AddPresetToTree(tree, dict_preset)
-                assert list_nodes
-                tree.nodes.active = list_nodes[-1]
-                bpy.ops.node.translate_attach('INVOKE_DEFAULT')
-                NtpData.dict_whereOpened[NtpData.GetKeyForDictWo(context)] = False
-        return {'FINISHED'}
+        tree = context.space_data.edit_tree
+        if (aNd:=tree.nodes.active)and(aNd.select)and(name:=prefs.nameOfPresetToExport):
+            ProcPresetFile(prefs, "Append", name=name, data=GetTextPresetFromTree(tree))
+            prefs.nameOfPresetToExport = ""
+            ProcPresetFile(prefs, "Load")
+    def DelPresetOp(event, name):
+        """Delete preset from file"""
+        if (event.shift)or(uu_ly.ProcConfirmAlert(name, limit=10.0)):
+            prefs = Prefs()
+            ProcPresetFile(prefs, "Remove", name=name)
+            ProcPresetFile(prefs, "Load")
+    def AddPresetOp(context, event, name):
+        """Add preset to a tree"""
+        prefs = Prefs()
+        if event.shift:
+            prefs.nameOfPresetToExport = name
+            return {'CANCELLED'}
+        dict_preset = NtpData.dict_presets[name]['eval']
+        bpy.ops.node.select_all(action='DESELECT')
+        tree = context.space_data.edit_tree
+        list_nodes = AddPresetToTree(tree, dict_preset)
+        assert list_nodes
+        tree.nodes.active = list_nodes[-1]
+        bpy.ops.node.translate_attach('INVOKE_DEFAULT')
+        key = NtpData.GetKeyForDictWo(context)
+        if (prefs.isPanelHideHeader)and(NtpData.dict_whereOpened[key]==1):
+            NtpData.dict_whereOpened[key] = 0
 
-class UserAlertDel:
-    sure = False
-    name = ""
-    time = 0.0
 class PanelNodeTextPresets(bpy.types.Panel):
     bl_idname = 'NTP_PT_NodeTextPresets'
     bl_label = "Node Text Presets"
     bl_space_type = 'NODE_EDITOR'
-    bl_region_type = 'TOOLS'
-    bl_options = {'HIDE_HEADER'}
     @classmethod
     def poll(cls, context):
         return not not context.space_data.edit_tree
@@ -264,67 +257,110 @@ class PanelNodeTextPresets(bpy.types.Panel):
         prefs = Prefs()
         tree = context.space_data.edit_tree
         aNd = tree.nodes.active
-        active = not not (aNd)and(aNd.select)
-        rowHeader = colRoot.row(align=True)
-        isOpened = NtpData.dict_whereOpened.get(NtpData.GetKeyForDictWo(context), False)
-        rowHeader.operator_props(OpNodeTextPresets.bl_idname, text=PanelNodeTextPresets.bl_label, icon='DOWNARROW_HLT' if isOpened else 'RIGHTARROW', option='TOGGLE')
-        if isOpened:
+        if prefs.isPanelHideHeader:
+            rowHeader = colRoot.row(align=True)
+            isOpened = NtpData.dict_whereOpened.get(NtpData.GetKeyForDictWo(context), False)
+            rowHeader.operator(OpSimpleExec.bl_idname, text=PanelNodeTextPresets.bl_label, icon='DOWNARROW_HLT' if isOpened else 'RIGHTARROW').exc = "NtpOp.TogglePanelOp(context)"
+            ##
+            if not isOpened:
+                return
+            rowHeader.operator(OpSimpleExec.bl_idname, text="", icon='PINNED' if isOpened==2 else 'UNPINNED').exc = "NtpOp.TogglePinOp(context)"
             #rowCopy = rowHeader.row(align=True) #P.s. кнопка копирования изначально была здесь.
             colPanel = colRoot.box().column()
-            rowFolder = colPanel.row(align=True)
-            rowFolder.prop(prefs,'pathToPresetFile', text="")
-            rowFolder.operator_props(OpNodeTextPresets.bl_idname, text="", icon='RESTRICT_VIEW_OFF', option='OPENFOLDER') #RESTRICT_VIEW_OFF  FOLDER_REDIRECT
-            rowFolder.operator_props(OpNodeTextPresets.bl_idname, text="", icon='FILE_REFRESH', option='RELOAD')
-            ##
-            colList = colPanel.column(align=True)
-            if NtpData.txtErrorInLoad:
-                colList.alert = True
-                colList.label(text=NtpData.txtErrorInLoad)
-                return
-            else:
-                if UserAlertDel.sure:
-                    secs = 10-(time.perf_counter()-UserAlertDel.time)
-                    if secs<0:
-                        UserAlertDel.sure = False
-                #todo кажется ещё нужен поисковой фильтр.
-                for dk, dv in NtpData.dict_presets.items():
+        else:
+            colPanel = colRoot.column()
+        intAllowFilter = prefs.intAllowFilter
+        if intAllowFilter:
+            rowSearch = colPanel.row(align=True)
+            rowFilter = rowSearch.row(align=True)
+            txt_filter = rowFilter.prop_and_get(prefs,'filter', text="", icon='SORTBYEXT')
+            rowSearch.active = (prefs.intAllowFilter==1)or(not not txt_filter)
+        ##
+        colList = colPanel.column(align=True)
+        if NtpData.txtErrorInLoad:
+            colList.alert = True
+            colList.label(text=NtpData.txtErrorInLoad)
+            return
+        else:
+            patr = re.compile(txt_filter) if (intAllowFilter)and(txt_filter) else None #Заметка: аккуратнее с txt_filter, см. объявление.
+            sco = 0
+            for dk, dv in NtpData.dict_presets.items():
+                if (not patr)or(re.search(patr, dk)):
                     if dv['eval']['tree']==context.space_data.tree_type:
                         rowItem = colList.row(align=True)
-                        rowItem.operator_props(OpNodeTextPresets.bl_idname, text=dk, icon='IMPORT', option='ADD', name=dk)
-                        rowItem.operator_props(OpNodeTextPresets.bl_idname, text="", icon='TRASH' if (UserAlertDel.sure)and(UserAlertDel.name==dk) else 'REMOVE', option='DEL', name=dk) #REMOVE  X
-            ##
+                        rowItem.operator(OpSimpleExec.bl_idname, text=dk, icon='IMPORT').exc = f"NtpOp.AddPresetOp(context, event, {repr(dk)})"
+                        rowItem.operator(OpSimpleExec.bl_idname, text="", icon='TRASH' if uu_ly.ProcConfirmAlert(dk) else 'REMOVE').exc = f"NtpOp.DelPresetOp(event, {repr(dk)})" #REMOVE  X
+                        sco += 1
+            if intAllowFilter:
+                rowFound = rowSearch.row(align=True)
+                rowFound.alignment = 'CENTER'
+                rowFound.label(text=" "+str(sco))
+        ##
+        intAllowExport = prefs.intAllowExport
+        if intAllowExport==2:
+            rowFolder = colPanel.row(align=True)
+            rowFolder.prop(prefs,'pathToPresetFile', text="")
+            rowFolder.operator(OpSimpleExec.bl_idname, text="", icon='RESTRICT_VIEW_OFF').exc = "NtpOp.OpenFolderOp()" #RESTRICT_VIEW_OFF  FOLDER_REDIRECT
+            rowFolder.operator(OpSimpleExec.bl_idname, text="", icon='FILE_REFRESH').exc = "NtpOp.ReloadOp()"
+        if intAllowExport:
             colIo = colPanel.column(align=True)
             rowIo = colIo.row(align=True)
-            rowIo.active = active
+            tgl = not not (aNd)and(aNd.select)
+            rowIo.active = tgl
             if True:
                 uu_ly.LyNiceColorProp(rowIo, prefs,'nameOfPresetToExport', text="Name:")
             else:
-                rowIo.prop(prefs,'nameOfPresetToExport', text="")
+                rowIo.prop(prefs,'nameOfPresetToExport', text="Name")
             rowEx = rowIo.row(align=True)
             rowOp = rowEx.row(align=True)
             rowOp.alignment = 'CENTER'
-            rowOp.operator_props(OpNodeTextPresets.bl_idname, text="Export", icon='EXPORT', option='EXPORT')
-            rowOp.enabled = (active)and(not not prefs.nameOfPresetToExport)
-            rowEx.operator_props(OpNodeTextPresets.bl_idname, text="", icon='COPYDOWN', option='COPYDIFF') #SELECT_DIFFERENCE  DUPLICATE  MOD_BOOLEAN  SELECT_INTERSECT
+            rowOp.operator(OpSimpleExec.bl_idname, text="Export", icon='EXPORT').exc = "NtpOp.ExportOp(context)"
+            rowOp.enabled = (tgl)and(not not prefs.nameOfPresetToExport)
+            rowEx.operator(OpSimpleExec.bl_idname, text="", icon='COPYDOWN').exc = "NtpOp.CopyDiffOp(context, event)" #SELECT_DIFFERENCE  DUPLICATE  MOD_BOOLEAN  SELECT_INTERSECT
 
 def Prefs():
     return bpy.context.preferences.addons[bl_info['name']].preferences
 
+def ReregUpdatePanel(self, context):
+    PanelNodeTextPresets.bl_category = self.txtPanelCategory
+    PanelNodeTextPresets.bl_region_type = 'UI' if PanelNodeTextPresets.bl_category else 'TOOLS'
+    PanelNodeTextPresets.bl_options = {'HIDE_HEADER'} if self.isPanelHideHeader else set()
+    if panel:=getattr(bpy.types, PanelNodeTextPresets.bl_idname, None):
+        bpy.utils.unregister_class(panel)
+    bpy.utils.register_class(PanelNodeTextPresets)
+def UpdateAllowFilter(self, context):
+    if not self.intAllowFilter:
+        self.filter = ""
 class AddonPrefs(bpy.types.AddonPreferences):
     bl_idname = bl_info['name'] if __name__=="__main__" else __name__
+    filter: bpy.props.StringProperty(name="Filter", default="(?i).*")
     pathToPresetFile:     bpy.props.StringProperty(name="Path to file with presets", default=os.path.join(os.environ['USERPROFILE'], "Desktop")+"\\ntp_presets.txt", subtype='FILE_PATH', update=UpdatePathToPresetFile)
     nameOfPresetToExport: bpy.props.StringProperty(name="Name of preset to export", default="")
+    intAllowFilter: bpy.props.IntProperty(name="Show search", default=2, min=0, max=2, update=UpdateAllowFilter)
+    intAllowExport: bpy.props.IntProperty(name="Show export", default=2, min=0, max=2, update=UpdateAllowFilter)
+    txtPanelCategory: bpy.props.StringProperty(name="Meta Panel Category", default="", update=ReregUpdatePanel)
+    isPanelHideHeader: bpy.props.BoolProperty(name="Meta Panel Hide Header", default=True, update=ReregUpdatePanel)
     def DrawTabSettings(self, context, where):
-        uu_ly.LyNiceColorProp(uu_ly.LyAddHeaderedBox(where, "preferences", active=False).column(), self,'pathToPresetFile')
+        colMain = uu_ly.LyAddHeaderedBox(where, "preferences", active=False).column()
+        uu_ly.LyNiceColorProp(colMain, self,'pathToPresetFile')
+        colMain.prop(self,'intAllowFilter')
+        colMain.prop(self,'intAllowExport')
+        uu_ly.LyNiceColorProp(colMain, self,'txtPanelCategory')
+        colMain.prop(self,'isPanelHideHeader')
     def draw(self, context):
         colMain = self.layout.column()
         self.DrawTabSettings(context, colMain)
 
 def register():
-    uu_regutils.LazyRegAll(rud, globals())
-    Prefs().nameOfPresetToExport = ""
+    bpy.utils.register_class(OpSimpleExec)
+    bpy.utils.register_class(AddonPrefs)
+    prefs = Prefs()
+    prefs.nameOfPresetToExport = ""
+    prefs.filter = ""
+    ReregUpdatePanel(prefs, None)
 def unregister():
-    uu_regutils.UnregKmiDefs(rud)
+    bpy.utils.unregister_class(AddonPrefs)
+    bpy.utils.unregister_class(OpSimpleExec)
 
 if __name__=="__main__":
     register()
