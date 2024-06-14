@@ -1,4 +1,10 @@
-#24.03.22 by ugorek
+#24.06.02 by ugorek
+
+from builtins import len as length
+
+##
+
+txtDoc = f'''Utility from "{__name__}.py" module'''
 
 import bpy
 
@@ -6,15 +12,56 @@ def prop_inac(self, *args, **kw_args):
     self.prop(*args, **kw_args)
     self.active = False
 bpy.types.UILayout.prop_inac = prop_inac #Гениально. Но юзабельно в основном с внешним ly.ly(stuff).prop_inac().
-prop_inac.__doc__ = f'''Utility from "{__name__}.py" module'''
+prop_inac.__doc__ = txtDoc
 
 def operator_props(self, operator, text="", text_ctxt="", translate=True, icon='NONE', emboss=True, depress=False, icon_value=0, **kw_args):
     op = self.operator(operator, text=text, text_ctxt=text_ctxt, translate=translate, icon=icon, emboss=emboss, depress=depress, icon_value=icon_value)
     for dk, dv in kw_args.items():
-        setattr(op, dk, dv)
+        setattr(op, dk.lstrip("_"), dv)
     #return op
 bpy.types.UILayout.operator_props = operator_props
-operator_props.__doc__ = f'''Utility from "{__name__}.py" module'''
+operator_props.__doc__ = txtDoc
+
+def prop_and_get(self, who, prop, **kw_args):
+    self.prop(who, prop, **kw_args)
+    return getattr(who, prop)
+bpy.types.UILayout.prop_and_get = prop_and_get
+prop_inac.__doc__ = txtDoc
+
+##
+
+import time
+
+class UserConfirmAlert:
+    secsLeft = property(lambda a: a.time+a.limit-time.perf_counter())
+    isFinal = property(lambda a: a.secsLeft<0.0) #property(lambda a: time.perf_counter()>a.time+a.limit)
+    count = property(lambda a: a.depth-1) #Или гениально, или кривая топология.
+    def __init__(self, limit):
+        self.depth = 0 #Количество нажатий.
+        self.time = 0.0
+        self.limit = limit
+    def Done(self):
+        self.depth = 0
+    
+dict_userConfirmAlert = {} #Заметка: Если в процессе алерта произойдёт импорт этого модуля где-то, то все алерты потеряются. Повезло, что ущерб от этого околонулевой.
+
+def ProcConfirmAlert(essKey, limit=None):
+    if limit is None:
+        if uca:=dict_userConfirmAlert.get(essKey, None):
+            if uca.isFinal:
+                uca.depth = 0 #Заметка: Очевидное -- важно обнулять для последующих кликов.
+                return False
+            return uca.depth
+        return False
+    else:
+        uca = dict_userConfirmAlert.setdefault(essKey, UserConfirmAlert(limit))
+        if limit>0.0:
+            uca.depth += 1
+            uca.time = time.perf_counter()
+            return uca.count
+        else:
+            uca.Done()
+            return None
 
 #Заметка: Если в названии есть Add -- функция возвращает макет.
 
@@ -71,14 +118,15 @@ class TryAndErrInLy():
             for li in traceback.format_exc().split("\n")[:-1]:
                 col.label(text=li)
 
-def LyNiceColorProp(where, ess, prop, align=False, text="", decor=3):
+def LyNiceColorProp(where, ess, prop, *, align=False, text="", scale=0.0, decor=3):
     rowCol = where.row(align=align)
     rowLabel = rowCol.row()
     rowLabel.alignment = 'LEFT'
     rowLabel.label(text=text if text else ess.bl_rna.properties[prop].name+":")
     rowLabel.active = decor%2
     rowProp = rowCol.row()
-    rowProp.alignment = 'EXPAND'
+    rowProp.alignment = 'LEFT' if scale else 'EXPAND'
+    rowProp.scale_x = scale
     rowProp.prop(ess, prop, text="")
     rowProp.active = decor//2%2
 
@@ -90,3 +138,53 @@ def LyHighlightingText(where, *args_txt):
             row.alignment = 'LEFT'
             row.label(text=txt)
             row.active = cyc%2
+
+
+def LyAddTemplateTotalRowHh(where, *tupleDataIcos, decor=21, aligns=0):
+    box = (where.row() if aligns else where).box()
+    box.scale_y = 0.5
+    rowMain = box.row(align=True)
+    rowTheme = rowMain.row(align=True)
+    rowTheme.alignment = 'LEFT'
+    rowLabel = rowTheme.row(align=True)
+    rowLabel.alignment = 'LEFT'
+    dec0 = decor//16%2
+    dec1 = 1-decor//32%2
+    if (dec1)or(dec0):
+        rowLabel.label(text="Total"*dec1+":"*dec0, icon='ASSET_MANAGER' if dec0 else 'NONE')
+    rowLabel.active = decor//8%2
+    ##
+    isAutoCanonTotal = (length(tupleDataIcos)==2)and(length(tupleDataIcos[0])==2)and(length(tupleDataIcos[0])==2)
+    type_tuple = type(())
+    for cyc, hh in enumerate(tupleDataIcos):
+        isTuple = type(hh)==type_tuple
+        isMultiTot = (isTuple)and(length(hh)>2)
+        if type(hh)!=str:
+            rowIco = rowTheme.row(align=True)
+            rowIco.label(icon=hh[0] if isTuple else 'RADIOBUT_ON') #RADIOBUT_ON  SNAP_FACE
+            rowIco.active = decor//2%2
+            row = rowIco.row(align=True)
+            row.separator()
+            row.scale_y = 0.5
+        rowData = rowTheme.row(align=True)
+        rowData.alignment = 'LEFT'
+        if isMultiTot:
+            rowTxt = rowData.row(align=True)
+            rowTxt.alignment = 'LEFT'
+            rowTxt.label(text=str(hh[1]))
+            rowDiv = rowTxt.row(align=True)
+            rowDiv.alignment = 'LEFT'
+            rowDiv.label(text="/")
+            rowDiv.active = False
+            rowTxt.label(text=str(hh[2]))
+        else:
+            rowData.label(text=str(hh[1] if isTuple else hh))
+        rowData.active = decor%2
+        if (isAutoCanonTotal)and(cyc==0)and(decor//4%2):
+            rowDiv = rowTheme.row(align=True)
+            rowDiv.alignment = 'LEFT'
+            rowDiv.label(text="/")
+            rowDiv.active = False
+    if aligns==1:
+        rowMain.label()
+#LyAddTemplateTotalRowHh(ly, ('RADIOBUT_OFF', sco), length(data))
